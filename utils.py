@@ -2,7 +2,6 @@ from statistics import mean
 from torch.utils.data import Dataset
 from collections import OrderedDict
 import xml.etree.ElementTree as ET
-import openai # For GPT-3 API ...
 import os
 import multiprocessing
 import json
@@ -48,48 +47,6 @@ def print_now(return_flag=0):
         return now
     else:
         pass
-
-# Sentence Generator (Decoder) for GPT-3 ...
-def decoder_for_gpt3(args, input, max_length, i, k):
-    
-    # GPT-3 API allows each users execute the API within 60 times in a minute ...
-    # time.sleep(1)
-    time.sleep(args.api_time_interval)
-    
-    # https://beta.openai.com/account/api-keys
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    #print(openai.api_key)
-    
-    # Specify engine ...
-    # Instruct GPT3
-    if args.model == "gpt3":
-        engine = "text-ada-001"
-    elif args.model == "gpt3-medium":
-        engine = "text-babbage-001"
-    elif args.model == "gpt3-large":
-        engine = "text-curie-001"
-    elif args.model == "gpt3-xl":
-        engine = "text-davinci-002"
-    else:
-        raise ValueError("model is not properly defined ...")
-        
-    response = openai.Completion.create(
-      engine=engine,
-      prompt=input,
-      max_tokens=max_length,
-      temperature=0,
-      stop=None
-    )
-    
-    return response["choices"][0]["text"]
-
-class Decoder():
-    def __init__(self, args):
-        print_now()
- 
-    def decode(self, args, input, max_length, i, k):
-        response = decoder_for_gpt3(args, input, max_length, i, k)
-        return response
 
 def data_reader(args):
 
@@ -550,3 +507,29 @@ def retrieve_demo_text_list(question_idx, dataset, topk_prompt):
         demo_text_list.append(demo_text)
         
     return demo_text_list
+
+def clean_response(pruned_prompt_text):
+
+    # format cleanning for results
+    pruned_prompt_text = pruned_prompt_text.replace('\n', '')
+    pruned_prompt_text = pruned_prompt_text.replace('Q :', 'Q:')
+    pruned_prompt_text = pruned_prompt_text.replace('A :', 'A:')
+    pruned_prompt_text = pruned_prompt_text.replace(' : Let', ' A: Let')
+    pruned_prompt_text = pruned_prompt_text.replace('A Let', 'A: Let')
+    pruned_prompt_text = pruned_prompt_text.replace('A\'s think', 'A: Let\'s think')
+    pruned_prompt_text = pruned_prompt_text.replace('Q:', '\n\nQ:')
+    pruned_prompt_text = pruned_prompt_text.replace('A:', '\nA:')
+    pruned_prompt_text = pruned_prompt_text.replace('A:\'s', 'A: Let\'s')
+    
+    pruned_prompt_text = pruned_prompt_text.replace('Let s', 'Let\'s')
+    pruned_prompt_text = pruned_prompt_text.replace('The is', 'The answer is')
+    pruned_prompt_text = pruned_prompt_text.replace('. answer is', '. The answer is')
+    pruned_prompt_text = pruned_prompt_text.replace('step by.', 'step by step.')
+    pruned_prompt_text = pruned_prompt_text.replace('step step.', 'step by step.')
+    pruned_prompt_text = pruned_prompt_text.replace('think step.', 'think step by step.')
+    pruned_prompt_text = pruned_prompt_text.replace('Let\'think', 'Let\'s think')
+    pruned_prompt_text = pruned_prompt_text.replace('Let\'s step', 'Let\'s think step')
+    pruned_prompt_text = pruned_prompt_text.replace('step step', 'step by step')
+    pruned_prompt_text = pruned_prompt_text.replace('step by step ', 'step by step. ')
+        
+    return pruned_prompt_text

@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # This software may be used and distributed according to the terms of the GNU General Public License version 3.
 
-from typing import Tuple
 import re
 import os
 import sys
@@ -12,9 +11,12 @@ import argparse
 from utils import *
 from tqdm import tqdm
 from pathlib import Path
-from datasets import load_dataset
-from transformers import GenerationConfig, LlamaForCausalLM, LlamaTokenizer, AutoModelForCausalLM, AutoTokenizer
+from typing import Tuple
 from transformers import BertTokenizer, BertModel
+from openicl import DatasetReader, TopkRetriever
+from datasets import load_dataset, Dataset, DatasetDict 
+from transformers import GenerationConfig, AutoModelForCausalLM, AutoTokenizer
+
 from llama_model.modeling_skim_predictor import SkimPredictor, C2FPromptPruner_PolicyNetwork
 
 def parse_arguments():
@@ -23,7 +25,7 @@ def parse_arguments():
     parser.add_argument("--random_seed", type=int, default=1, help="random seed")
     parser.add_argument("--dataset", type=str, default="gsm8k", choices=["aqua", "gsm8k", "commonsensqa", "addsub", "multiarith",  "strategyqa", "svamp", "singleeq", "bigbench_date", "object_tracking", "coin_flip", "last_letters"], help="dataset used for experiment")
     parser.add_argument("--minibatch_size", type=int, default=1, choices=[1], help="minibatch size should be 1 because GPT-3 API takes only 1 input for each request")
-    parser.add_argument("--max_num_worker", type=int, default=3, help="maximum number of workers for dataloader")
+    parser.add_argument("--max_num_worker", type=int, default=16, help="maximum number of workers for dataloader")
     parser.add_argument("--method", type=str, default="few_shot_cot", choices=["zero_shot", "zero_shot_cot", "few_shot", "few_shot_cot"], help="method")
     parser.add_argument("--cot_trigger_no", type=int, default=1, help="A trigger sentence that elicits a model to execute chain of thought")
     parser.add_argument("--cot_shot_length", type=int, default=8, help="length of shots of cot for few-shot ICL settings")
@@ -138,21 +140,23 @@ def load_model(args) -> tuple:
         raise ValueError(f'can not find base model name by the value: {args.model}')
 
     load_8bit = args.load_8bit
-    tokenizer = LlamaTokenizer.from_pretrained(base_model) 
+    tokenizer = AutoTokenizer.from_pretrained(base_model) 
+    
     model = AutoModelForCausalLM.from_pretrained(
             base_model,
             load_in_8bit=load_8bit,
             torch_dtype=torch.float16,
             device_map="auto",
             trust_remote_code=True,
-        ) # fix zwq
+        ) 
+
     return tokenizer, model
 
-def evaluate(tokenizer, model, input=None, temperature=0.8, top_p=0.95, top_k=40, num_beams=1, max_new_tokens=256,**kwargs):
+def evaluate(tokenizer, model, input=None, temperature=0.8, top_p=0.95, top_k=40, num_beams=1, max_new_tokens=256, **kwargs):
     inputs = tokenizer(input, return_tensors="pt")
     input_ids = inputs["input_ids"].to('cuda')
     generation_config = GenerationConfig(
-        do_sample=False,
+        do_sample=False, # no sampling will give best reasoning performance
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
@@ -225,20 +229,19 @@ def main():
     else:
         raise NotImplementedError("{} dataset is not supported".format(args.dataset))
 
-    from datasets import Dataset, DatasetDict  
+    tokenizer, model = load_model(args)
+    print("Finish Loading Models")
+ 
     test_subset = Dataset.from_list(test_data) 
     train_subset = Dataset.from_list(train_data) 
     dataset = DatasetDict({"train": train_subset,"test": test_subset})
 
-    from openicl import DatasetReader, TopkRetriever
     data = DatasetReader(dataset, input_columns=['question'], output_column='answer')
     retriever = TopkRetriever(data, ice_num=args.cot_shot_length)
     topk_prompt = retriever.retrieve()
 
     del retriever, data
     torch.cuda.empty_cache()
-
-    tokenizer, model = load_model(args)
 
     bert_tokenizer = BertTokenizer.from_pretrained('bert-large-cased')
     bert_tokenizer.add_tokens(["\n"])
@@ -328,7 +331,6 @@ def generate_pruned_prompt(full_prompt, shot_selection, token_selection, tokeniz
     input_ids = torch.tensor([tokenized_text['input_ids']])
     input_ids = torch.squeeze(input_ids, 0)
 
-    #print(input_ids.size())
     pruned_input_ids = input_ids[shot_selection,:]
     pruned_input_ids_flatten = torch.flatten(pruned_input_ids)
     pruned_input_ids_final = pruned_input_ids_flatten[token_selection]
@@ -343,30 +345,13 @@ def compress_prompt(input_prompt, pruner_model, bert_tokenizer, bert_model, targ
     with torch.no_grad():
         last_hidden_states = bert_model(input_ids)[0] # Models outputs are now tuples
 
-    # shot_selection, token_selection = pruner_model.fix_forward(last_hidden_states,target_shot,target_token)
-    # shot_selection = shot_selection.to(torch.bool)
-    # token_selection = token_selection.to(torch.bool)
-
     _, shot_selection, token_selection, _, _ = pruner_model(last_hidden_states)
 
     pruned_few_shot_input_id = generate_pruned_prompt(input_prompt, shot_selection, token_selection, bert_tokenizer)
     pruned_prompt_text = bert_tokenizer.decode(pruned_few_shot_input_id, skip_special_tokens=True)
 
-    pruned_prompt_text = pruned_prompt_text.replace('\n', '')
-    pruned_prompt_text = pruned_prompt_text.replace('Q :', 'Q:')
-    pruned_prompt_text = pruned_prompt_text.replace('A :', 'A:')
-    pruned_prompt_text = pruned_prompt_text.replace(' : Let', ' A: Let')
-    pruned_prompt_text = pruned_prompt_text.replace('A Let', 'A: Let')
-    pruned_prompt_text = pruned_prompt_text.replace('A\'s think', 'A: Let\'s think')
-    pruned_prompt_text = pruned_prompt_text.replace('Q:', '\n\nQ:')
-    pruned_prompt_text = pruned_prompt_text.replace('A:', '\nA:')
-    
-    pruned_prompt_text = pruned_prompt_text.replace('Let s', 'Let\'s')
-    pruned_prompt_text = pruned_prompt_text.replace('The is', 'The answer is')
-    pruned_prompt_text = pruned_prompt_text.replace('. answer is', '. The answer is')
-    pruned_prompt_text = pruned_prompt_text.replace('step by.', 'step by step.')
-    pruned_prompt_text = pruned_prompt_text.replace('step step.', 'step by step.')
-    pruned_prompt_text = pruned_prompt_text.replace('think step.', 'think step by step.')
+    # format cleanning for results
+    pruned_prompt_text = clean_response(pruned_prompt_text)
 
     return pruned_prompt_text[2:]
 
