@@ -87,8 +87,8 @@ CUDA_VISIBLE_DEVICES=0 python example_retrieval_pruner.py \
 | `LLaMA2-13B` | **32.22**  | `llama2_13b.pth` |  [link](./logs/llama2-13b-best_eval-score_increase_reasoning_24shot_add16shot.log) |
 | `LLaMA2-70B` | **59.59**  | `llama2_70b.pth` |  [link](./logs/llama2-70b-best_eval-add_constraints_32shot_add8shot.log) |
 
-## 💌 Contact
+## 💌 Acknowledgement and Contact
 
-Xijie HUANG (huangxijie1108 at gmail.com or xhuangbs at connect.ust.hk) 
+This repo benefits from [zero_shot_cot](https://github.com/kojima-takeshi188/zero_shot_cot), [WizardLM](https://github.com/nlpxucan/WizardLM), [LLM-Adapters](https://github.com/AGI-Edgerunners/LLM-Adapters), and [OpenICL](https://github.com/Shark-NLP/OpenICL). Thanks for their wonderful works!
 
-Li Lyna Zhang (lzhani at microsoft.com)
+If you have any questions, feel free to contact Xijie HUANG (huangxijie1108 at gmail.com or xhuangbs at connect.ust.hk) and Li Lyna Zhang (lzhani at microsoft.com).
