@@ -79,7 +79,7 @@ CUDA_VISIBLE_DEVICES=0 python example_retrieval_pruner.py \
 2>&1 | tee -a ./logs/llama2-70b-gsm8k.log
 ```
 
-## 📚 CoT-Influx Evaluation Logs of GSM8K (w/ pruned prompt)
+## 📚 Results and Logs
 
 | Model    | EM (\%) on GSM8K | Pruner weights  | Evaluation logs |
 |:-------:|:--------:|:--------:|:--------:|
